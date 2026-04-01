@@ -1,0 +1,1371 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>감정 다이어리</title>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css" rel="stylesheet"/>
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Pretendard', -apple-system, system-ui, sans-serif; }
+  #root { min-height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect, useRef, useCallback, useMemo } = React;
+
+/* ═══════════ NLP Engine ═══════════ */
+function normalizeKorean(t) { return (t || "").replace(/[.,!?;:"'~\[\]\(\)\{\}<>\/\|\\\-]+/g, " ").replace(/\s+/g, " ").trim(); }
+const ENDINGS = ["했습니다","했습니까","했어요","했어","했다","하였다","하세요","하셨다","하네요","하네","하자","한다","한다고","한다면","합니다","합니까","합니다만","해요","해","함","했던","했을","하게","스럽다","스러웠다","스러워요","스러웠어요","스럽고","스럽지만","됐다","되었다","됐어","되었어","됩니다","되다","었다","았다","였다","었어","았어","였어","었어요","았어요","였어요","ㄴ다","는다","다","어","아","여","고","며","지만","는데","ㄴ데","을","를","이","가","은","는","에","에서","으로","로","와","과","도","만","까지","부터","처럼","같이","보다"];
+function stemKorean(w) { let s = w; for (const e of ENDINGS) { if (s.length > e.length + 1 && s.endsWith(e)) return s.slice(0, -e.length); } return s; }
+const STRENGTH = { strong: ["매우","아주","정말","너무","완전","굉장히","대단히","진짜","참으로","엄청","무척","몹시","극도로","상당히"], weak: ["조금","약간","살짝","다소","그럭저럭","조금은","살짝은","좀"] };
+
+const EMOTIONS_28 = [
+  { name:"excited",label:"신남",kw:["신나다","신나","들뜨다","들뜨","흥분하다","흥분","짜릿하다","짜릿","신났","신남"],val:9,aro:9,q:"HA" },
+  { name:"elated",label:"희열",kw:["희열","황홀","들뜸","들떴다","들떴","환호"],val:9,aro:8,q:"HA" },
+  { name:"enthusiastic",label:"열정",kw:["열정적","열정","의욕적","의욕","열의"],val:8,aro:8,q:"HA" },
+  { name:"happy",label:"행복",kw:["행복하다","행복","기쁘다","기쁨","기뻤","기쁘","기뻐","행복했","행복해"],val:9,aro:7,q:"HA" },
+  { name:"joyful",label:"즐거움",kw:["즐겁다","즐겁","즐거","즐거움","유쾌하다","유쾌","즐거웠","재밌","재미있","재미"],val:8,aro:7,q:"HA" },
+  { name:"proud",label:"뿌듯",kw:["뿌듯하다","뿌듯","뿌듯했","자랑스럽다","자랑스럽","자랑스러","성취감","보람"],val:8,aro:6,q:"HA" },
+  { name:"grateful",label:"감사",kw:["감사하다","감사","감사했","고맙다","고맙","고마워","고마웠","감동"],val:8,aro:5,q:"HA" },
+  { name:"content",label:"만족",kw:["만족하다","만족","만족했","만족스럽","흐뭇하다","흐뭇","흐뭇했"],val:8,aro:3,q:"LA" },
+  { name:"relaxed",label:"편안",kw:["편안하다","편안","편안했","편해","이완","느긋하다","느긋","여유"],val:8,aro:3,q:"LA" },
+  { name:"calm",label:"차분",kw:["차분하다","차분","차분했","고요하다","고요","평온하다","평온","평온했","잔잔"],val:8,aro:2,q:"LA" },
+  { name:"serene",label:"온화",kw:["안온하다","안온","온화하다","온화","포근","따뜻","따뜻했","훈훈"],val:7,aro:2,q:"LA" },
+  { name:"secure",label:"안정",kw:["안정되다","안정감","안정","안도","안심","든든","든든했"],val:7,aro:3,q:"LA" },
+  { name:"angry",label:"분노",kw:["화나다","화나","화났","화가","분노하다","분노","격분","성나","빡치","빡쳤"],val:2,aro:9,q:"HV" },
+  { name:"annoyed",label:"짜증",kw:["짜증","짜증나","짜증났","거슬리다","거슬리","거슬","귀찮","성가시"],val:3,aro:7,q:"HV" },
+  { name:"tense",label:"긴장",kw:["긴장","긴장되","긴장됐","긴장했","팽팽하다","팽팽","떨리","떨렸"],val:3,aro:8,q:"HV" },
+  { name:"stressed",label:"스트레스",kw:["스트레스","압박감","압박","과부하","부담","부담됐","버거","버거웠"],val:2,aro:8,q:"HV" },
+  { name:"afraid",label:"두려움",kw:["두렵다","두렵","두려","두려웠","겁나다","겁나","겁났","공포","무서","무서웠","무섭"],val:2,aro:9,q:"HV" },
+  { name:"anxious",label:"불안",kw:["불안","불안하","불안했","초조","초조하","초조했","걱정","걱정됐","걱정되","걱정했"],val:3,aro:8,q:"HV" },
+  { name:"guilty",label:"죄책감",kw:["죄책감","미안하다","미안","미안했","미안해","가책","후회","후회했","후회됐"],val:3,aro:6,q:"HV" },
+  { name:"sad",label:"슬픔",kw:["슬프다","슬프","슬퍼","슬펐","슬픔","눈물","울었","울컥","서러","서러웠"],val:2,aro:2,q:"LV" },
+  { name:"depressed",label:"우울",kw:["우울","우울하","우울했","침울","침잠","울적","울적했","암울"],val:2,aro:2,q:"LV" },
+  { name:"tired",label:"피곤",kw:["피곤","피곤하","피곤했","지치다","지치","지쳤","탈진","녹초","기진맥진","힘들","힘들었"],val:3,aro:2,q:"LV" },
+  { name:"bored",label:"지루함",kw:["지루하다","지루","지루했","심심하다","심심","심심했","권태","권태롭","따분"],val:3,aro:1,q:"LV" },
+  { name:"lonely",label:"외로움",kw:["외롭다","외롭","외로","외로웠","고독","쓸쓸하다","쓸쓸","쓸쓸했","혼자"],val:3,aro:2,q:"LV" },
+  { name:"disappointed",label:"실망",kw:["실망","실망했","실망하","허탈","허탈했","허무","허무했","속상","속상했","서운","서운했"],val:3,aro:3,q:"LV" },
+  { name:"surprised+",label:"놀람(+)",kw:["놀라","놀랐","뜻밖","대박","헐"],val:6,aro:8,q:"HA" },
+  { name:"surprised-",label:"경악",kw:["경악","경악했","충격","충격받","충격이","당황","당황했","당황스러"],val:4,aro:8,q:"HV" },
+  { name:"interested",label:"흥미",kw:["관심","흥미","흥미롭","흥미로","궁금","궁금했","호기심"],val:6,aro:6,q:"HA" },
+  { name:"hopeful",label:"희망",kw:["희망","희망적","기대","기대되","기대됐","기대했","설레","설렜","설렘"],val:7,aro:5,q:"HA" },
+];
+const POS_EXTRA = ["좋았","좋아","좋은","괜찮았","괜찮아","사랑","사랑스러","웃음","웃었","미소","성취","용기","활기","상쾌","자유","긍정","응원","격려","존중","가치","소중","도움","친절","이해","자신감","영감","평화","추억","잘했","해냈","나아졌","회복","성공","보람찼","의미","훈훈","따뜻","포근","행운","축하","칭찬","인정","배움","성장","발전","개선","해결","극복","달성","완수","감격","환희","축복","기특","대견","사랑해","고마워","최고","멋지","아름다","빛나","화이팅","파이팅","응원해","잘될","잘된","잘되","좋겠","다행","다행이"];
+const NEG_EXTRA = ["불쾌","좌절","억울","비참","무기력","공허","절망","답답","막막","아팠","아프","아파","자책","모욕","상처","포기","무시","나빴","나쁜","싫었","싫어","싫은","별로","최악","끔찍","지겨","지겨웠","괴롭","괴로웠","고통","고통스러","혼란","혼란스러","창피","부끄러","부끄러웠","수치","한심","한심했","비참했","처참","절박","위기","위험","불행","불행했","못했","안됐","안되","실패","실패했","잘못","잘못했","틀렸","틀린","아쉬","아쉬웠","아쉬운","그리","그리웠","그리운","허전","허전했"];
+
+// ─── Subject Detection: "my emotion" vs "someone else's emotion" ───
+// Person words (bare form) - these alone don't determine subject vs object
+const PERSON_WORDS = [
+  "친구","엄마","아빠","부모님","동생","형","오빠","언니","누나",
+  "선생님","쌤","할머니","할아버지","그","그녀","걔","쟤","얘",
+  "그애","그사람","애","애들","남자","여자","아이","사람",
+  "팀원","동료","상대방","상대","짝꿍","반친구","옆자리",
+];
+// Subject particles → the person IS the subject → emotion belongs to THEM
+const SUBJ_PARTICLES = ["가","이","는","은","도","께서","에서"];
+// Object/companion particles → the person is NOT subject → emotion belongs to ME
+const OBJ_PARTICLES = ["와","과","이랑","랑","하고","한테","에게","한테서","에게서","를","을","의","보다","처럼","같이","만나","때문에","때문","덕분에","덕분"];
+// Self-reference: always means "my" emotion
+const SELF_SUBJECTS = [
+  "나","나는","나도","내가","나의","내",
+  "저","저는","저도","제가","제",
+  "본인","본인이","본인은",
+  "스스로","스스로가",
+];
+const LOOK_BACK = 4;
+
+function isOtherSubject(tokens, emotionIdx) {
+  const start = Math.max(0, emotionIdx - LOOK_BACK);
+  for (let i = start; i < emotionIdx; i++) {
+    const t = tokens[i];
+
+    // Self-reference found → definitely my emotion
+    if (SELF_SUBJECTS.some(s => t === s || t.startsWith(s))) return false;
+
+    // Check if token contains a person word
+    const personMatch = PERSON_WORDS.find(p => t === p || t.startsWith(p));
+    if (personMatch) {
+      const suffix = t.slice(personMatch.length); // particle after the person word
+
+      // No particle (bare word like "친구") → check next token for particle
+      if (suffix === "") {
+        const nextTok = i + 1 < tokens.length ? tokens[i + 1] : "";
+        // If next token is an object/companion particle or starts with one
+        if (OBJ_PARTICLES.some(op => nextTok === op || nextTok.startsWith(op))) return false;
+        // If next token is a subject particle
+        if (SUBJ_PARTICLES.some(sp => nextTok === sp)) return true;
+        // Bare person word with no clear particle → ambiguous, treat as other's by default
+        return true;
+      }
+
+      // Has object/companion particle attached → my emotion
+      if (OBJ_PARTICLES.some(op => suffix === op || suffix.startsWith(op))) return false;
+
+      // Has subject particle attached → other's emotion
+      if (SUBJ_PARTICLES.some(sp => suffix === sp || suffix.startsWith(sp))) return true;
+
+      // Particle not recognized → default to other's
+      return true;
+    }
+  }
+  // No person word found = diary default = about me
+  return false;
+}
+
+function analyzeEntry(text) {
+  const norm = normalizeKorean(text);
+  const tokens = norm.split(" ").filter(Boolean);
+  const hits = [];
+  const excluded = []; // emotions detected but belonging to others
+  const seen = new Set();
+
+  for (let ti = 0; ti < tokens.length; ti++) {
+    const tok = tokens[ti];
+    const st = stemKorean(tok);
+    for (const emo of EMOTIONS_28) {
+      if (seen.has(emo.name)) continue;
+      for (const kw of emo.kw) {
+        const ks = stemKorean(kw);
+        if ((st.length >= 2 && ks.length >= 2 && (st.includes(ks) || ks.startsWith(st))) || tok.includes(kw) || kw.startsWith(tok)) {
+          seen.add(emo.name);
+          const entry = { name: emo.name, label: emo.label, q: emo.q, val9: emo.val, aro9: emo.aro, valStd: ((emo.val - 1) / 8) * 2 - 1, aroStd: ((emo.aro - 1) / 8) * 2 - 1, token: tok };
+          if (isOtherSubject(tokens, ti)) {
+            excluded.push(entry);
+          } else {
+            hits.push(entry);
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  let posS = 0, negS = 0;
+  const mP = [], mN = [];
+  let w = 1;
+  for (let ti = 0; ti < tokens.length; ti++) {
+    const tok = tokens[ti];
+    const st = stemKorean(tok);
+    if (STRENGTH.strong.some(m => st === m || tok === m)) { w = 2; continue; }
+    if (STRENGTH.weak.some(m => st === m || tok === m)) { w = 0.5; continue; }
+    let f = false;
+    for (const pw of POS_EXTRA) {
+      const ps = stemKorean(pw);
+      if ((st.length >= 2 && ps.length >= 2 && (st.includes(ps) || ps.startsWith(st))) || tok.includes(pw)) {
+        // Check subject for extended lexicon too
+        if (!isOtherSubject(tokens, ti)) {
+          posS += w; mP.push({ word: pw, weight: w });
+        }
+        f = true; break;
+      }
+    }
+    if (!f) {
+      for (const nw of NEG_EXTRA) {
+        const ns = stemKorean(nw);
+        if ((st.length >= 2 && ns.length >= 2 && (st.includes(ns) || ns.startsWith(st))) || tok.includes(nw)) {
+          if (!isOtherSubject(tokens, ti)) {
+            negS += w; mN.push({ word: nw, weight: w });
+          }
+          f = true; break;
+        }
+      }
+    }
+    if (f) w = 1; else if (w !== 1) w = 1;
+  }
+  for (const h of hits) { if (h.val9 > 5) posS += 1; else if (h.val9 < 5) negS += 1; }
+  const tot = posS + negS;
+  const aV = hits.length ? hits.reduce((s, h) => s + h.val9, 0) / hits.length : 5;
+  const aA = hits.length ? hits.reduce((s, h) => s + h.aro9, 0) / hits.length : 5;
+  return { hits, excluded, matchedPos: mP, matchedNeg: mN, posScore: posS, negScore: negS, posPct: tot > 0 ? (posS / tot) * 100 : 0, negPct: tot > 0 ? (negS / tot) * 100 : 0, valence9: aV, arousal9: aA, valStd: ((aV - 1) / 8) * 2 - 1, aroStd: ((aA - 1) / 8) * 2 - 1 };
+}
+
+const QC = { HA: "#e85d04", HV: "#d00000", LV: "#457b9d", LA: "#2a9d8f" };
+const QB = { HA: "#fff3e6", HV: "#ffe6e6", LV: "#e6f0f5", LA: "#e6f5f2" };
+function eCol(h) { return QC[h.q] || "#888"; }
+
+/* ═══════════ Storage ═══════════ */
+const SK = { schools: "t-schools-v3" };
+function dKey(id) { return "diary:" + id; }
+function stuKey(code) { return "stu:" + code; }
+async function sGet(k) { try { const r = localStorage.getItem(k); return r ? JSON.parse(r) : null; } catch (e) { return null; } }
+async function sSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { console.error(e); } }
+
+/* ═══════════ Styles ═══════════ */
+const FONT = "https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable.min.css";
+const shell = { minHeight: "100vh", background: "linear-gradient(135deg,#f0f4ff 0%,#fdf2f8 50%,#ecfdf5 100%)", color: "#1e293b", fontFamily: "'Pretendard',-apple-system,system-ui,sans-serif" };
+const inp = { width: "100%", padding: "12px 14px", fontSize: 14, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 12, color: "#1e293b", outline: "none", boxSizing: "border-box" };
+const bPri = { padding: "12px 24px", fontSize: 14, fontWeight: 700, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", border: "none", borderRadius: 12, cursor: "pointer" };
+const bSoft = { padding: "10px 16px", fontSize: 13, fontWeight: 600, background: "#f1f5f9", color: "#475569", border: "1px solid #e2e8f0", borderRadius: 12, cursor: "pointer" };
+const bDanger = { ...bSoft, color: "#dc2626", border: "1px solid #fecaca", background: "#fef2f2" };
+const crd = { padding: 20, background: "#fff", borderRadius: 16, border: "1px solid #e5e7eb", boxShadow: "0 1px 3px rgba(0,0,0,0.04)" };
+const lbl = { fontSize: 11, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 };
+const bdg = (c = "#6366f1", bg = "#eef2ff") => ({ display: "inline-block", padding: "4px 12px", borderRadius: 20, background: bg, color: c, fontSize: 12, fontWeight: 700 });
+
+function EmptyState({ icon, text, action, actionLabel = "일기 쓰러 가기" }) {
+  return (
+    <div style={{ textAlign: "center", padding: 48, color: "#94a3b8" }}>
+      <div style={{ fontSize: 44, marginBottom: 12 }}>{icon}</div>
+      <p>{text}</p>
+      {action && <button onClick={action} style={{ marginTop: 12, padding: "8px 20px", fontSize: 13, background: "#eef2ff", color: "#6366f1", border: "1px solid #c7d2fe", borderRadius: 8, cursor: "pointer" }}>{actionLabel}</button>}
+    </div>
+  );
+}
+
+/* ═══════════ Circumplex ═══════════ */
+function CircumplexChart({ entries, hovIdx, onHover }) {
+  const cRef = useRef(null), conRef = useRef(null);
+  const [tip, setTip] = useState(null);
+  const [sz, setSz] = useState(480);
+  useEffect(() => { const ro = new ResizeObserver(([e]) => setSz(Math.min(e.contentRect.width, 520))); if (conRef.current) ro.observe(conRef.current); return () => ro.disconnect(); }, []);
+  const M = 52, rad = (sz - M * 2) / 2, cx = sz / 2, cy = sz / 2;
+  const pts = useMemo(() => { const p = []; entries.forEach((en, ei) => { en.analysis.hits.forEach((h) => { p.push({ px: cx + h.valStd * rad, py: cy - h.aroStd * rad, ei, hit: h, date: en.date }); }); }); return p; }, [entries, sz, cx, cy, rad]);
+
+  useEffect(() => {
+    const cv = cRef.current; if (!cv) return;
+    const dpr = window.devicePixelRatio || 1; cv.width = sz * dpr; cv.height = sz * dpr;
+    const c = cv.getContext("2d"); c.scale(dpr, dpr); c.clearRect(0, 0, sz, sz);
+    c.fillStyle = "#fafbfc"; c.fillRect(0, 0, sz, sz);
+    [{ x: cx, y: cy - rad, w: rad, h: rad, cl: "rgba(232,93,4,0.04)" }, { x: cx - rad, y: cy - rad, w: rad, h: rad, cl: "rgba(208,0,0,0.04)" }, { x: cx - rad, y: cy, w: rad, h: rad, cl: "rgba(69,123,157,0.04)" }, { x: cx, y: cy, w: rad, h: rad, cl: "rgba(42,157,143,0.04)" }].forEach(q => { c.fillStyle = q.cl; c.fillRect(q.x, q.y, q.w, q.h); });
+    [0.25, 0.5, 0.75, 1].forEach(s => { c.beginPath(); c.arc(cx, cy, rad * s, 0, Math.PI * 2); c.strokeStyle = s === 1 ? "rgba(0,0,0,0.12)" : "rgba(0,0,0,0.06)"; c.lineWidth = 1; c.stroke(); });
+    c.strokeStyle = "rgba(0,0,0,0.15)"; c.lineWidth = 1.2; c.beginPath(); c.moveTo(cx - rad, cy); c.lineTo(cx + rad, cy); c.stroke(); c.beginPath(); c.moveTo(cx, cy - rad); c.lineTo(cx, cy + rad); c.stroke();
+    c.font = "600 10px 'Pretendard',system-ui"; c.fillStyle = "rgba(0,0,0,0.25)"; c.textAlign = "center";
+    c.fillText("활기·흥분", cx + rad * 0.55, cy - rad * 0.9); c.fillText("분노·불안", cx - rad * 0.55, cy - rad * 0.9); c.fillText("슬픔·피로", cx - rad * 0.55, cy + rad * 0.95); c.fillText("평온·만족", cx + rad * 0.55, cy + rad * 0.95);
+    c.fillStyle = "rgba(0,0,0,0.35)"; c.font = "600 11px 'Pretendard',system-ui"; c.fillText("긍정 →", cx + rad - 28, cy + 18); c.fillText("← 부정", cx - rad + 28, cy + 18);
+    c.save(); c.translate(cx - 18, cy - rad + 28); c.rotate(-Math.PI / 2); c.fillText("고각성 ↑", 0, 0); c.restore();
+    c.save(); c.translate(cx - 18, cy + rad - 28); c.rotate(-Math.PI / 2); c.fillText("↓ 저각성", 0, 0); c.restore();
+    c.globalAlpha = 0.18; for (const em of EMOTIONS_28) { const vs = ((em.val - 1) / 8) * 2 - 1, as = ((em.aro - 1) / 8) * 2 - 1; c.beginPath(); c.arc(cx + vs * rad, cy - as * rad, 2.5, 0, Math.PI * 2); c.fillStyle = QC[em.q]; c.fill(); } c.globalAlpha = 1;
+    entries.forEach((en, ei) => {
+      const isH = hovIdx === ei, dim = hovIdx !== null && !isH;
+      en.analysis.hits.forEach((h) => {
+        const px = cx + h.valStd * rad, py = cy - h.aroStd * rad, col = eCol(h), dR = isH ? 9 : 6;
+        if (isH) { const g = c.createRadialGradient(px, py, 0, px, py, dR * 3.5); g.addColorStop(0, col + "44"); g.addColorStop(1, col + "00"); c.fillStyle = g; c.beginPath(); c.arc(px, py, dR * 3.5, 0, Math.PI * 2); c.fill(); }
+        c.beginPath(); c.arc(px, py, dR, 0, Math.PI * 2); c.fillStyle = dim ? col + "30" : col + "cc"; c.fill(); c.strokeStyle = dim ? col + "20" : col; c.lineWidth = 1.5; c.stroke();
+        if (!dim) { c.fillStyle = "rgba(0,0,0,0.65)"; c.font = (isH ? "600 " : "500 ") + (isH ? "12" : "9") + "px 'Pretendard',system-ui"; c.textAlign = "center"; c.fillText(h.label, px, py - dR - 5); }
+      });
+      if (en.analysis.hits.length > 0) { const ax = cx + en.analysis.valStd * rad, ay = cy - en.analysis.aroStd * rad; c.beginPath(); c.arc(ax, ay, isH ? 5 : 3.5, 0, Math.PI * 2); c.fillStyle = dim ? "rgba(100,100,120,0.15)" : "#334155"; c.fill(); }
+    });
+    if (entries.length > 1) { const ps = entries.filter(e => e.analysis.hits.length > 0).map(e => [cx + e.analysis.valStd * rad, cy - e.analysis.aroStd * rad]); if (ps.length > 1) { c.beginPath(); c.moveTo(ps[0][0], ps[0][1]); for (let i = 1; i < ps.length; i++) c.lineTo(ps[i][0], ps[i][1]); c.strokeStyle = "rgba(51,65,85,0.18)"; c.lineWidth = 1.5; c.setLineDash([4, 4]); c.stroke(); c.setLineDash([]); } }
+  }, [entries, sz, hovIdx, cx, cy, rad]);
+
+  const hM = (e) => { const rc = cRef.current.getBoundingClientRect(); const mx = (e.clientX - rc.left) * (sz / rc.width), my = (e.clientY - rc.top) * (sz / rc.height); let f = null; for (const p of pts) { if (Math.hypot(mx - p.px, my - p.py) < 16) { f = p; break; } } setTip(f ? { x: e.clientX - rc.left, y: e.clientY - rc.top, ...f } : null); onHover(f ? f.ei : null); };
+  return (
+    <div ref={conRef} style={{ position: "relative", width: "100%" }}>
+      <canvas ref={cRef} style={{ width: sz, height: sz, maxWidth: "100%", cursor: tip ? "pointer" : "crosshair", borderRadius: 16 }} onMouseMove={hM} onMouseLeave={() => { setTip(null); onHover(null); }} />
+      {tip && (
+        <div style={{ position: "absolute", left: Math.min(tip.x + 14, sz - 180), top: Math.max(tip.y - 50, 4), background: "#fff", border: "2px solid " + eCol(tip.hit), borderRadius: 10, padding: "10px 14px", fontSize: 12, color: "#1e293b", pointerEvents: "none", boxShadow: "0 8px 24px rgba(0,0,0,0.12)", zIndex: 10, whiteSpace: "nowrap" }}>
+          <div style={{ fontWeight: 700, color: eCol(tip.hit), fontSize: 14 }}>{tip.hit.label}</div>
+          <div style={{ opacity: 0.6, marginTop: 3 }}>{tip.date} · "{tip.hit.token}"</div>
+          <div style={{ opacity: 0.5, marginTop: 2, fontSize: 11 }}>V:{tip.hit.val9} A:{tip.hit.aro9}</div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ═══════════ Trend Chart ═══════════ */
+function TrendChart({ entries }) {
+  const cRef = useRef(null); const W = 540, H = 150;
+  useEffect(() => {
+    const cv = cRef.current; if (!cv || entries.length < 2) return;
+    const dpr = window.devicePixelRatio || 1; cv.width = W * dpr; cv.height = H * dpr; const c = cv.getContext("2d"); c.scale(dpr, dpr); c.clearRect(0, 0, W, H); c.fillStyle = "#fafbfc"; c.fillRect(0, 0, W, H);
+    const pad = { l: 40, r: 16, t: 16, b: 30 }, w = W - pad.l - pad.r, h = H - pad.t - pad.b, n = entries.length;
+    const xO = (i) => pad.l + (i / (n - 1)) * w, yO = (v) => pad.t + h - (v / 100) * h;
+    for (let y = 0; y <= 100; y += 25) { const py = yO(y); c.strokeStyle = "rgba(0,0,0,0.06)"; c.lineWidth = 0.8; c.beginPath(); c.moveTo(pad.l, py); c.lineTo(pad.l + w, py); c.stroke(); c.fillStyle = "rgba(0,0,0,0.3)"; c.font = "9px 'Pretendard',system-ui"; c.textAlign = "right"; c.fillText(y + "%", pad.l - 6, py + 3); }
+    const dF = (v, fl) => { c.beginPath(); c.moveTo(xO(0), yO(v[0])); v.forEach((val, i) => c.lineTo(xO(i), yO(val))); c.lineTo(xO(n - 1), yO(0)); c.lineTo(xO(0), yO(0)); c.closePath(); c.fillStyle = fl; c.fill(); };
+    const dL = (v, col) => { c.beginPath(); v.forEach((val, i) => { i === 0 ? c.moveTo(xO(i), yO(val)) : c.lineTo(xO(i), yO(val)); }); c.strokeStyle = col; c.lineWidth = 2.2; c.stroke(); v.forEach((val, i) => { c.beginPath(); c.arc(xO(i), yO(val), 3.5, 0, Math.PI * 2); c.fillStyle = col; c.fill(); c.strokeStyle = "#fff"; c.lineWidth = 1.5; c.stroke(); }); };
+    const pos = entries.map(e => e.analysis.posPct), neg = entries.map(e => e.analysis.negPct);
+    dF(pos, "rgba(42,157,143,0.1)"); dF(neg, "rgba(208,0,0,0.08)"); dL(pos, "#2a9d8f"); dL(neg, "#d00000");
+    c.fillStyle = "rgba(0,0,0,0.4)"; c.font = "9px 'Pretendard',system-ui"; c.textAlign = "center"; entries.forEach((e, i) => c.fillText(e.date, xO(i), H - 8));
+  }, [entries]);
+  if (entries.length < 2) return null;
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: "#64748b", marginBottom: 6, display: "flex", gap: 16 }}>
+        <span><span style={{ color: "#2a9d8f" }}>●</span> 긍정</span>
+        <span><span style={{ color: "#d00000" }}>●</span> 부정</span>
+      </div>
+      <canvas ref={cRef} style={{ width: W, height: H, maxWidth: "100%", borderRadius: 12 }} />
+    </div>
+  );
+}
+
+/* ═══════════ Emotion Tag ═══════════ */
+function EmoTag({ h }) { return <span style={{ fontSize: 10, padding: "2px 8px", borderRadius: 16, background: QB[h.q], color: eCol(h), fontWeight: 600 }}>{h.label}</span>; }
+
+/* ═══════════ Situation-to-Emotion Suggestion Map ═══════════ */
+const SITUATION_MAP = [
+  { kw: ["시험","시험을","시험이","시험봤","시험본","테스트"], ctx: "시험", suggest: ["anxious","tense","stressed","hopeful","proud","disappointed"] },
+  { kw: ["발표","발표했","발표를","프레젠테이션"], ctx: "발표", suggest: ["tense","anxious","proud","afraid","excited","relieved"] },
+  { kw: ["싸웠","싸움","다퉜","다투","싸우","말다툼","갈등"], ctx: "다툼", suggest: ["angry","sad","guilty","annoyed","disappointed","lonely"] },
+  { kw: ["운동","달리","뛰었","축구","농구","수영","체육","운동했"], ctx: "운동", suggest: ["excited","tired","joyful","proud","content","relaxed"] },
+  { kw: ["숙제","과제","공부","공부했","숙제했","과제했","학원","학원에"], ctx: "공부", suggest: ["tired","stressed","bored","proud","content","interested"] },
+  { kw: ["여행","놀러","소풍","캠프","체험","견학"], ctx: "여행/체험", suggest: ["excited","happy","joyful","interested","grateful","relaxed"] },
+  { kw: ["아팠","아프","아파","병원","감기","열","머리아","배아"], ctx: "아픈 경험", suggest: ["tired","sad","anxious","lonely","afraid","annoyed"] },
+  { kw: ["생일","생일이","선물","파티","축하"], ctx: "생일/축하", suggest: ["happy","excited","grateful","joyful","surprised+","content"] },
+  { kw: ["이사","전학","헤어","이별","떠나","작별"], ctx: "이별/변화", suggest: ["sad","lonely","anxious","hopeful","afraid","disappointed"] },
+  { kw: ["칭찬","상","상을","1등","잘했다고","잘한","표창"], ctx: "칭찬/성과", suggest: ["proud","happy","grateful","excited","content","elated"] },
+  { kw: ["혼났","혼나","야단","꾸중","지적","벌","벌을"], ctx: "혼남", suggest: ["sad","guilty","angry","annoyed","afraid","disappointed"] },
+  { kw: ["놀았","놀이","게임","게임했","놀았다","놀러갔"], ctx: "놀이", suggest: ["joyful","happy","excited","content","relaxed","interested"] },
+  { kw: ["먹었","먹었다","밥","맛있","맛없","간식","급식","점심","저녁"], ctx: "식사", suggest: ["content","happy","joyful","disappointed","grateful","annoyed"] },
+  { kw: ["잤","잠","못잤","늦잠","일찍","깼","꿈"], ctx: "수면", suggest: ["tired","relaxed","calm","annoyed","content","anxious"] },
+  { kw: ["비","눈","날씨","더워","추워","덥","춥","맑"], ctx: "날씨", suggest: ["calm","annoyed","content","depressed","joyful","relaxed"] },
+  { kw: ["TV","유튜브","영화","드라마","만화","웹툰","책","읽었"], ctx: "미디어/독서", suggest: ["interested","joyful","relaxed","bored","content","excited"] },
+  { kw: ["청소","정리","집안일","설거지","빨래"], ctx: "집안일", suggest: ["tired","annoyed","content","proud","bored","calm"] },
+  { kw: ["전화","문자","연락","카톡","톡","DM"], ctx: "연락", suggest: ["happy","anxious","interested","lonely","annoyed","grateful"] },
+  { kw: ["등교","하교","학교","교실","수업","쉬는시간"], ctx: "학교생활", suggest: ["bored","joyful","tired","interested","anxious","content"] },
+  { kw: ["새로","처음","시작","도전","첫"], ctx: "새로운 시작", suggest: ["anxious","excited","hopeful","afraid","interested","tense"] },
+];
+
+function detectSituations(text) {
+  const norm = normalizeKorean(text);
+  const tokens = norm.split(" ").filter(Boolean);
+  const found = [];
+  for (const sit of SITUATION_MAP) {
+    for (const tok of tokens) {
+      const st = stemKorean(tok);
+      if (sit.kw.some(kw => tok.includes(kw) || st.includes(stemKorean(kw)))) {
+        found.push(sit);
+        break;
+      }
+    }
+  }
+  return found;
+}
+
+function getSuggestions(situations) {
+  // Collect unique emotion names from all matched situations, ranked by frequency
+  const freq = {};
+  for (const sit of situations) {
+    for (const eName of sit.suggest) {
+      freq[eName] = (freq[eName] || 0) + 1;
+    }
+  }
+  // Sort by frequency, take top 6
+  const sorted = Object.entries(freq).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  // Map to full emotion objects
+  return sorted.map(([name]) => EMOTIONS_28.find(e => e.name === name)).filter(Boolean);
+}
+
+/* ═══════════ Emotion Eating Game ═══════════ */
+const GAME_QS = [
+  { sit: "시험에서 떨어졌어요", ans: "실망", wrongs: ["행복","편안","신남"] },
+  { sit: "생일 선물을 받았어요", ans: "행복", wrongs: ["분노","피곤","외로움"] },
+  { sit: "친구와 크게 싸웠어요", ans: "분노", wrongs: ["만족","희열","차분"] },
+  { sit: "발표를 앞두고 있어요", ans: "긴장", wrongs: ["편안","지루함","만족"] },
+  { sit: "혼자 집에 있어요", ans: "외로움", wrongs: ["신남","열정","희열"] },
+  { sit: "숙제가 너무 많아요", ans: "스트레스", wrongs: ["행복","편안","감사"] },
+  { sit: "친구가 이사를 갔어요", ans: "슬픔", wrongs: ["신남","만족","흥미"] },
+  { sit: "달리기 1등을 했어요", ans: "뿌듯", wrongs: ["우울","두려움","짜증"] },
+  { sit: "선생님께 칭찬받았어요", ans: "감사", wrongs: ["분노","피곤","불안"] },
+  { sit: "수업이 너무 지루해요", ans: "지루함", wrongs: ["신남","희열","감사"] },
+  { sit: "새 학기가 시작되었어요", ans: "희망", wrongs: ["피곤","분노","실망"] },
+  { sit: "무서운 영화를 봤어요", ans: "두려움", wrongs: ["행복","만족","뿌듯"] },
+  { sit: "엄마가 맛있는 걸 해주셨어요", ans: "만족", wrongs: ["분노","슬픔","긴장"] },
+  { sit: "운동을 많이 했어요", ans: "피곤", wrongs: ["신남","희열","분노"] },
+  { sit: "재미있는 책을 발견했어요", ans: "흥미", wrongs: ["피곤","슬픔","분노"] },
+  { sit: "내일 소풍을 가요", ans: "신남", wrongs: ["우울","피곤","분노"] },
+  { sit: "친구에게 미안한 말을 했어요", ans: "죄책감", wrongs: ["행복","편안","신남"] },
+  { sit: "가족여행을 다녀왔어요", ans: "즐거움", wrongs: ["외로움","분노","긴장"] },
+  { sit: "비 오는 날 창밖을 봐요", ans: "차분", wrongs: ["분노","신남","긴장"] },
+  { sit: "전학 온 첫날이에요", ans: "불안", wrongs: ["편안","만족","지루함"] },
+];
+
+function EmotionGame() {
+  const vidRef = useRef(null);
+  const canRef = useRef(null);
+  const animRef = useRef(null);
+  const gameRef = useRef({
+    faceX: 0.5, faceY: 0.5, faceW: 0.15,
+    bubbles: [], score: 0, combo: 0, qIdx: 0, state: "idle",
+    timer: 0, maxTime: 12, lives: 3, correct: 0, total: 0,
+    usedQs: [], feedback: null, feedbackTime: 0,
+  });
+
+  const [score, setScore] = useState(0);
+  const [lives, setLives] = useState(3);
+  const [combo, setCombo] = useState(0);
+  const [gameState, setGameState] = useState("idle"); // idle, playing, over
+  const [camReady, setCamReady] = useState(false);
+  const [camError, setCamError] = useState(false);
+  const [question, setQuestion] = useState(null);
+  const [feedback, setFeedback] = useState(null); // {text, correct}
+  const [stats, setStats] = useState({ correct: 0, total: 0 });
+
+  // Start camera
+  const startCam = useCallback(async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user", width: 480, height: 360 } });
+      if (vidRef.current) { vidRef.current.srcObject = stream; vidRef.current.play(); setCamReady(true); }
+    } catch (e) { setCamError(true); }
+  }, []);
+
+  // Stop camera
+  const stopCam = useCallback(() => {
+    if (vidRef.current && vidRef.current.srcObject) {
+      vidRef.current.srcObject.getTracks().forEach(t => t.stop());
+      vidRef.current.srcObject = null;
+    }
+    setCamReady(false);
+    if (animRef.current) cancelAnimationFrame(animRef.current);
+  }, []);
+
+  useEffect(() => { return () => stopCam(); }, [stopCam]);
+
+  // Face detection via skin color
+  const detectFace = useCallback((ctx, w, h) => {
+    const img = ctx.getImageData(0, 0, w, h);
+    const d = img.data;
+    let sumX = 0, sumY = 0, cnt = 0;
+    const step = 4; // sample every 4th pixel for speed
+    for (let y = 0; y < h; y += step) {
+      for (let x = 0; x < w; x += step) {
+        const i = (y * w + x) * 4;
+        const r = d[i], g = d[i+1], b = d[i+2];
+        // Skin color heuristic (works for various skin tones)
+        if (r > 60 && g > 40 && b > 20 && r > g && r > b && (r - g) > 15 && Math.abs(r - g) < 120 && r - b > 15) {
+          sumX += x; sumY += y; cnt++;
+        }
+      }
+    }
+    if (cnt > 50) {
+      // Mirror X because video is flipped
+      return { x: 1 - (sumX / cnt / w), y: sumY / cnt / h, detected: true };
+    }
+    return { x: 0.5, y: 0.5, detected: false };
+  }, []);
+
+  // Pick next question
+  const nextQuestion = useCallback(() => {
+    const g = gameRef.current;
+    if (g.usedQs.length >= GAME_QS.length) g.usedQs = [];
+    let idx;
+    do { idx = Math.floor(Math.random() * GAME_QS.length); } while (g.usedQs.includes(idx));
+    g.usedQs.push(idx);
+    const q = GAME_QS[idx];
+
+    // Create 4 bubbles (1 correct + 3 wrong) at random x positions
+    const allEmotions = [q.ans, ...q.wrongs].sort(() => Math.random() - 0.5);
+    const bubbles = allEmotions.map((label, i) => ({
+      label, correct: label === q.ans,
+      x: 0.15 + (i * 0.23) + (Math.random() * 0.05),
+      y: -0.05 - (Math.random() * 0.1),
+      speed: 0.003 + Math.random() * 0.002,
+      eaten: false, size: 0.09,
+    }));
+    g.bubbles = bubbles;
+    g.timer = 0;
+    g.qIdx = idx;
+    setQuestion(q);
+    setFeedback(null);
+  }, []);
+
+  // Start game
+  const startGame = useCallback(() => {
+    const g = gameRef.current;
+    g.score = 0; g.combo = 0; g.lives = 3; g.correct = 0; g.total = 0;
+    g.usedQs = []; g.state = "playing"; g.feedback = null;
+    setScore(0); setLives(3); setCombo(0); setGameState("playing");
+    setStats({ correct: 0, total: 0 }); setFeedback(null);
+    nextQuestion();
+    startCam();
+  }, [nextQuestion, startCam]);
+
+  // Game loop
+  useEffect(() => {
+    if (gameState !== "playing" || !camReady) return;
+    const cv = canRef.current;
+    const vid = vidRef.current;
+    if (!cv || !vid) return;
+    const ctx = cv.getContext("2d");
+
+    const loop = () => {
+      const W = cv.width, H = cv.height;
+      const g = gameRef.current;
+      ctx.clearRect(0, 0, W, H);
+
+      // Background (sky gradient instead of video)
+      var bgGrad = ctx.createLinearGradient(0, 0, 0, H);
+      bgGrad.addColorStop(0, "#c7d2fe"); bgGrad.addColorStop(0.5, "#e0e7ff"); bgGrad.addColorStop(1, "#ddd6fe");
+      ctx.fillStyle = bgGrad; ctx.fillRect(0, 0, W, H);
+      // Ground
+      ctx.fillStyle = "#a7f3d0"; ctx.fillRect(0, H - 50, W, 50);
+      ctx.fillStyle = "#6ee7b7";
+      for (var gi = 0; gi < W; gi += 40) { ctx.beginPath(); ctx.arc(gi + 20, H - 50, 18, Math.PI, 0); ctx.fill(); }
+      // Clouds
+      ctx.fillStyle = "rgba(255,255,255,0.6)";
+      var drawCloud = function(cx2, cy2, s) { ctx.beginPath(); ctx.arc(cx2, cy2, 15*s, 0, Math.PI*2); ctx.arc(cx2+14*s, cy2-4*s, 12*s, 0, Math.PI*2); ctx.arc(cx2-14*s, cy2-2*s, 10*s, 0, Math.PI*2); ctx.arc(cx2+7*s, cy2-10*s, 11*s, 0, Math.PI*2); ctx.fill(); };
+      drawCloud(80, 80, 1.2); drawCloud(300, 60, 1); drawCloud(420, 90, 0.8);
+
+      // Detect face from video (hidden)
+      var tmpC = document.createElement("canvas");
+      tmpC.width = 120; tmpC.height = 90;
+      var tmpCtx = tmpC.getContext("2d");
+      tmpCtx.drawImage(vid, 0, 0, 120, 90);
+      var face = detectFace(tmpCtx, 120, 90);
+      if (face.detected) { g.faceX += (face.x - g.faceX) * 0.3; g.faceY += (face.y - g.faceY) * 0.3; }
+
+      var fx = g.faceX * W, fy = g.faceY * H;
+      var mouthY = fy + 25;
+
+      // Situation text box
+      ctx.fillStyle = "rgba(99,102,241,0.85)";
+      var boxW = 340, boxH = 40, boxX = (W - boxW) / 2, boxY = 10;
+      ctx.beginPath(); ctx.roundRect(boxX, boxY, boxW, boxH, 12); ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.font = "bold 15px 'Pretendard',system-ui";
+      ctx.textAlign = "center";
+      if (question) ctx.fillText(question.sit, W / 2, 36);
+
+      // ── Draw cute character ──
+      var charSize = 50;
+      // Body (round)
+      ctx.fillStyle = "#fde68a";
+      ctx.beginPath(); ctx.arc(fx, fy + 10, charSize, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 2.5; ctx.stroke();
+      // Face circle
+      ctx.fillStyle = "#fff8e1";
+      ctx.beginPath(); ctx.arc(fx, fy - 5, charSize * 0.75, 0, Math.PI * 2); ctx.fill();
+      // Eyes
+      var eyeY = fy - 12;
+      // Left eye
+      ctx.fillStyle = "#1e293b";
+      ctx.beginPath(); ctx.ellipse(fx - 16, eyeY, 5, 6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(fx - 14, eyeY - 2, 2, 0, Math.PI * 2); ctx.fill();
+      // Right eye
+      ctx.fillStyle = "#1e293b";
+      ctx.beginPath(); ctx.ellipse(fx + 16, eyeY, 5, 6, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.beginPath(); ctx.arc(fx + 18, eyeY - 2, 2, 0, Math.PI * 2); ctx.fill();
+      // Blush
+      ctx.fillStyle = "rgba(251,146,146,0.4)";
+      ctx.beginPath(); ctx.ellipse(fx - 26, fy - 2, 8, 5, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.ellipse(fx + 26, fy - 2, 8, 5, 0, 0, Math.PI * 2); ctx.fill();
+      // Mouth (open - eating!)
+      ctx.fillStyle = "#ef4444";
+      ctx.beginPath(); ctx.arc(fx, fy + 8, 10, 0, Math.PI); ctx.fill();
+      ctx.fillStyle = "#fca5a5";
+      ctx.beginPath(); ctx.arc(fx, fy + 8, 10, 0, Math.PI, true);
+      ctx.closePath(); ctx.fill();
+      // Ears
+      ctx.fillStyle = "#fde68a"; ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.arc(fx - charSize + 5, fy - 20, 12, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.beginPath(); ctx.arc(fx + charSize - 5, fy - 20, 12, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      // Inner ear
+      ctx.fillStyle = "#fca5a5";
+      ctx.beginPath(); ctx.arc(fx - charSize + 5, fy - 20, 6, 0, Math.PI * 2); ctx.fill();
+      ctx.beginPath(); ctx.arc(fx + charSize - 5, fy - 20, 6, 0, Math.PI * 2); ctx.fill();
+      // Little crown/antenna
+      ctx.fillStyle = "#a78bfa";
+      ctx.beginPath(); ctx.moveTo(fx - 8, fy - 40); ctx.lineTo(fx, fy - 55); ctx.lineTo(fx + 8, fy - 40); ctx.fill();
+      ctx.fillStyle = "#c4b5fd";
+      ctx.beginPath(); ctx.arc(fx, fy - 56, 4, 0, Math.PI * 2); ctx.fill();
+
+      // Update & draw bubbles
+      g.timer += 1 / 60;
+      let anyActive = false;
+      for (const b of g.bubbles) {
+        if (b.eaten) continue;
+        b.y += b.speed;
+        const bx = b.x * W, by = b.y * H;
+        const bSize = b.size * W;
+
+        // Check collision with mouth
+        const dist = Math.sqrt(Math.pow(bx - fx, 2) + Math.pow(by - mouthY, 2));
+        if (dist < bSize / 2 + 20) {
+          b.eaten = true;
+          g.total++;
+          if (b.correct) {
+            g.score += 10 + g.combo * 2;
+            g.combo++;
+            g.correct++;
+            g.feedback = { text: "정답! +" + (10 + (g.combo - 1) * 2), correct: true };
+            setScore(g.score); setCombo(g.combo);
+            setFeedback({ text: "정답! +" + (10 + (g.combo - 1) * 2), correct: true });
+            setStats({ correct: g.correct, total: g.total });
+            // Next question after brief delay
+            setTimeout(() => { if (g.state === "playing") nextQuestion(); }, 800);
+          } else {
+            g.combo = 0;
+            g.lives--;
+            g.feedback = { text: "오답! 정답: " + question.ans, correct: false };
+            setCombo(0); setLives(g.lives);
+            setFeedback({ text: "오답! 정답: " + question.ans, correct: false });
+            setStats({ correct: g.correct, total: g.total });
+            if (g.lives <= 0) {
+              g.state = "over";
+              setGameState("over");
+              stopCam();
+              return;
+            }
+            setTimeout(() => { if (g.state === "playing") nextQuestion(); }, 1200);
+          }
+          continue;
+        }
+
+        // Draw bubble as cute candy
+        if (b.y < 1.1) {
+          anyActive = true;
+          var bR = bSize / 2;
+          // Candy colors per position
+          var candyColors = ["#f472b6","#a78bfa","#60a5fa","#34d399"];
+          var cIdx = Math.abs(Math.round(b.x * 10)) % 4;
+          var cc = candyColors[cIdx];
+          // Shadow
+          ctx.fillStyle = "rgba(0,0,0,0.08)";
+          ctx.beginPath(); ctx.ellipse(bx, by + bR + 4, bR * 0.8, 4, 0, 0, Math.PI * 2); ctx.fill();
+          // Candy body
+          ctx.fillStyle = cc;
+          ctx.beginPath(); ctx.arc(bx, by, bR, 0, Math.PI * 2); ctx.fill();
+          ctx.strokeStyle = "#fff"; ctx.lineWidth = 3; ctx.stroke();
+          // Shine
+          ctx.fillStyle = "rgba(255,255,255,0.4)";
+          ctx.beginPath(); ctx.arc(bx - bR * 0.25, by - bR * 0.25, bR * 0.3, 0, Math.PI * 2); ctx.fill();
+          // Label
+          ctx.fillStyle = "#fff";
+          ctx.font = "bold 14px 'Pretendard',system-ui";
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          ctx.fillText(b.label, bx, by);
+        }
+      }
+
+      // If all bubbles fell off screen or eaten, next question
+      const allGone = g.bubbles.every(b => b.eaten || b.y > 1.15);
+      if (allGone && g.state === "playing") {
+        const anyCorrectEaten = g.bubbles.some(b => b.correct && b.eaten);
+        if (!anyCorrectEaten) {
+          // Missed the correct answer
+          g.combo = 0;
+          g.lives--;
+          g.feedback = { text: "놓쳤어요! 정답: " + question.ans, correct: false };
+          setCombo(0); setLives(g.lives);
+          setFeedback({ text: "놓쳤어요! 정답: " + question.ans, correct: false });
+          g.total++;
+          setStats({ correct: g.correct, total: g.total });
+          if (g.lives <= 0) {
+            g.state = "over";
+            setGameState("over");
+            stopCam();
+            return;
+          }
+        }
+        setTimeout(() => { if (g.state === "playing") nextQuestion(); }, 1000);
+      }
+
+      // Draw feedback text with cute style
+      if (g.feedback) {
+        // Feedback bubble
+        var fbW = 260, fbH = 50;
+        ctx.fillStyle = g.feedback.correct ? "rgba(42,157,143,0.92)" : "rgba(239,68,68,0.92)";
+        ctx.beginPath(); ctx.roundRect(W/2 - fbW/2, H/2 - fbH/2, fbW, fbH, 16); ctx.fill();
+        ctx.strokeStyle = "#fff"; ctx.lineWidth = 2; ctx.beginPath(); ctx.roundRect(W/2 - fbW/2, H/2 - fbH/2, fbW, fbH, 16); ctx.stroke();
+        ctx.font = "bold 22px 'Pretendard',system-ui";
+        ctx.textAlign = "center"; ctx.textBaseline = "middle";
+        ctx.fillStyle = "#fff";
+        ctx.fillText((g.feedback.correct ? "O " : "X ") + g.feedback.text, W / 2, H / 2);
+      }
+
+      // HUD: cute bottom bar
+      ctx.fillStyle = "rgba(255,255,255,0.85)";
+      ctx.beginPath(); ctx.roundRect(10, H - 44, W - 20, 38, 12); ctx.fill();
+      ctx.strokeStyle = "#e2e8f0"; ctx.lineWidth = 1; ctx.beginPath(); ctx.roundRect(10, H - 44, W - 20, 38, 12); ctx.stroke();
+      // Score
+      ctx.font = "bold 14px 'Pretendard',system-ui";
+      ctx.textAlign = "left"; ctx.textBaseline = "middle";
+      ctx.fillStyle = "#6366f1";
+      ctx.fillText(" " + g.score + "점", 24, H - 25);
+      // Hearts
+      ctx.fillStyle = "#f87171";
+      ctx.font = "16px 'Pretendard',system-ui";
+      ctx.textAlign = "center";
+      var heartsStr = "";
+      for (var hi = 0; hi < 3; hi++) heartsStr += hi < g.lives ? String.fromCodePoint(10084) + " " : String.fromCodePoint(9825) + " ";
+      ctx.fillText(heartsStr, W / 2, H - 25);
+      // Combo
+      if (g.combo > 1) {
+        ctx.fillStyle = "#f59e0b";
+        ctx.font = "bold 14px 'Pretendard',system-ui";
+        ctx.textAlign = "right";
+        ctx.fillText(g.combo + " COMBO!", W - 24, H - 25);
+      }
+
+      animRef.current = requestAnimationFrame(loop);
+    };
+    animRef.current = requestAnimationFrame(loop);
+    return () => { if (animRef.current) cancelAnimationFrame(animRef.current); };
+  }, [gameState, camReady, detectFace, nextQuestion, question, stopCam]);
+
+  // Idle screen
+  if (gameState === "idle") return (
+    <div style={{ textAlign: "center", padding: "32px 0" }}>
+      <div style={{ fontSize: 56, marginBottom: 16 }}>🎮</div>
+      <h3 style={{ fontSize: 20, fontWeight: 700, color: "#1e293b", margin: "0 0 8px" }}>감정 먹기 게임</h3>
+      <p style={{ fontSize: 13, color: "#64748b", lineHeight: 1.6, margin: "0 0 24px" }}>
+        얼굴을 움직이면 귀여운 캐릭터가 따라와요!<br />
+        상황을 읽고, 알맞은 감정 캔디를 먹어보세요.<br />
+        틀린 감정을 먹으면 하트를 잃어요.
+      </p>
+      <div style={{ display: "flex", gap: 12, justifyContent: "center", flexWrap: "wrap", marginBottom: 20 }}>
+        <div style={{ ...crd, padding: "12px 16px", textAlign: "center", flex: "0 1 120px" }}>
+          <div style={{ fontSize: 24 }}>🎯</div>
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>상황에 맞는<br />감정을 찾아요</div>
+        </div>
+        <div style={{ ...crd, padding: "12px 16px", textAlign: "center", flex: "0 1 120px" }}>
+          <div style={{ fontSize: 24 }}>🐣</div>
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>귀여운 캐릭터를<br />움직여요</div>
+        </div>
+        <div style={{ ...crd, padding: "12px 16px", textAlign: "center", flex: "0 1 120px" }}>
+          <div style={{ fontSize: 24 }}>🍬</div>
+          <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>감정 캔디를<br />냠냠 먹어요</div>
+        </div>
+      </div>
+      <button onClick={startGame} style={{ ...bPri, padding: "14px 40px", fontSize: 16 }}>게임 시작</button>
+      {camError && <p style={{ color: "#d00000", fontSize: 12, marginTop: 12 }}>카메라 접근이 거부되었어요. 브라우저 설정에서 카메라를 허용해주세요.</p>}
+    </div>
+  );
+
+  // Game over screen
+  if (gameState === "over") {
+    const pct = stats.total > 0 ? Math.round((stats.correct / stats.total) * 100) : 0;
+    const grade = pct >= 90 ? "S" : pct >= 70 ? "A" : pct >= 50 ? "B" : "C";
+    const gradeColor = { S: "#6366f1", A: "#2a9d8f", B: "#f59e0b", C: "#d00000" }[grade];
+    const msg = { S: "감정 마스터! 놀라워요!", A: "잘했어요! 감정을 잘 알고 있네요!", B: "좋아요! 조금 더 연습해봐요!", C: "괜찮아요! 다시 도전해봐요!" }[grade];
+    return (
+      <div style={{ textAlign: "center", padding: "32px 0" }}>
+        <div style={{ fontSize: 72, fontWeight: 900, color: gradeColor, marginBottom: 4 }}>{grade}</div>
+        <div style={{ fontSize: 36, fontWeight: 800, color: "#1e293b", marginBottom: 8 }}>{score}점</div>
+        <p style={{ fontSize: 15, color: "#64748b", margin: "0 0 4px" }}>{msg}</p>
+        <p style={{ fontSize: 13, color: "#94a3b8", margin: "0 0 24px" }}>정답률: {stats.correct}/{stats.total} ({pct}%)</p>
+        <div style={{ display: "flex", gap: 8, justifyContent: "center" }}>
+          <button onClick={startGame} style={{ ...bPri, padding: "12px 32px" }}>다시 도전</button>
+          <button onClick={() => { setGameState("idle"); setFeedback(null); }} style={{ ...bSoft, padding: "12px 20px" }}>처음으로</button>
+        </div>
+      </div>
+    );
+  }
+
+  // Playing screen
+  return (
+    <div style={{ position: "relative", width: "100%", maxWidth: 480, margin: "0 auto" }}>
+      <video ref={vidRef} style={{ display: "none" }} playsInline muted />
+      <canvas ref={canRef} width={480} height={360} style={{ width: "100%", borderRadius: 16, background: "#1e293b" }} />
+      <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
+        <button onClick={() => { stopCam(); gameRef.current.state = "over"; setGameState("over"); }} style={{ ...bSoft, padding: "6px 14px", fontSize: 12 }}>게임 종료</button>
+        <span style={{ fontSize: 12, color: "#94a3b8" }}>얼굴을 움직여 정답 캔디를 먹으세요!</span>
+      </div>
+    </div>
+  );
+}
+
+/* ═══════════ Date Helpers ═══════════ */
+function fmtDate(d) { return (d.getMonth() + 1) + "." + d.getDate(); }
+function nextDay(dateStr) {
+  // Parse "M.D" format and return next day
+  const parts = dateStr.split(".");
+  if (parts.length < 2) return dateStr;
+  const now = new Date();
+  const m = parseInt(parts[0]) - 1;
+  const d = parseInt(parts[1]);
+  const date = new Date(now.getFullYear(), m, d);
+  date.setDate(date.getDate() + 1);
+  return fmtDate(date);
+}
+function todayStr() { return fmtDate(new Date()); }
+
+/* ═══════════ DiaryView ═══════════ */
+function DiaryView({ entries, setEntries, save, readOnly }) {
+  const [date, setDate] = useState(todayStr);
+  const [text, setText] = useState("");
+  const [tab, setTab] = useState(readOnly ? "change" : "input");
+  const [hovIdx, setHovIdx] = useState(null);
+  const [lastR, setLastR] = useState(null);
+
+  // Suggestion flow state
+  const [pending, setPending] = useState(null); // { text, date, situations, suggestions }
+  const [customEmo, setCustomEmo] = useState(""); // custom emotion text input
+  const [showCustom, setShowCustom] = useState(false); // toggle custom input
+
+  const advanceDate = useCallback((savedEntries, usedDate) => {
+    const today = todayStr();
+    if (usedDate === today) { setDate(nextDay(today)); }
+    else { setDate(nextDay(usedDate)); }
+  }, []);
+
+  // Core save function (always saves)
+  const doSave = useCallback((entryText, entryDate) => {
+    const analysis = analyzeEntry(entryText);
+    const ne = { date: entryDate, text: entryText, analysis, ts: Date.now() + Math.random() };
+    const u = [...entries, ne];
+    setEntries(u); save(u); setLastR(ne); setText(""); setPending(null);
+    advanceDate(u, entryDate);
+    if (u.length >= 2 && tab === "input") setTab("change");
+  }, [entries, tab, setEntries, save, advanceDate]);
+
+  // Main add: check for emotions, if none found check situations
+  const add = useCallback(() => {
+    if (!text.trim() || readOnly) return;
+    const rawText = text.trim();
+    // Parse optional date prefix
+    const parts = rawText.split(/\s+/);
+    const hasD = parts.length > 1 && /^\d+\.?\d*$/.test(parts[0]);
+    const entryDate = hasD ? parts[0] : date.trim();
+    const entryText = hasD ? parts.slice(1).join(" ") : rawText;
+
+    // Run analysis
+    const analysis = analyzeEntry(entryText);
+    const hasEmotion = analysis.hits.length > 0 || analysis.matchedPos.length > 0 || analysis.matchedNeg.length > 0;
+
+    if (hasEmotion) {
+      // Emotions detected: save directly
+      doSave(entryText, entryDate);
+    } else {
+      // No emotions: check for situation words
+      const situations = detectSituations(entryText);
+      if (situations.length > 0) {
+        const suggestions = getSuggestions(situations);
+        setPending({
+          text: entryText,
+          date: entryDate,
+          situations,
+          suggestions,
+          contextLabel: situations.map(s => s.ctx).join(", "),
+        });
+      } else {
+        // No situations either: still show generic suggestion
+        const genericSuggestions = [
+          EMOTIONS_28.find(e => e.name === "happy"),
+          EMOTIONS_28.find(e => e.name === "sad"),
+          EMOTIONS_28.find(e => e.name === "angry"),
+          EMOTIONS_28.find(e => e.name === "anxious"),
+          EMOTIONS_28.find(e => e.name === "tired"),
+          EMOTIONS_28.find(e => e.name === "calm"),
+          EMOTIONS_28.find(e => e.name === "excited"),
+          EMOTIONS_28.find(e => e.name === "lonely"),
+        ].filter(Boolean);
+        setPending({
+          text: entryText,
+          date: entryDate,
+          situations: [],
+          suggestions: genericSuggestions,
+          contextLabel: null,
+        });
+      }
+    }
+  }, [text, date, readOnly, doSave]);
+
+  // Select a suggested emotion and save
+  const confirmWithEmotion = useCallback((emo) => {
+    if (!pending) return;
+    // Append the emotion keyword to the text so analyzeEntry picks it up
+    const augmented = pending.text + " " + emo.kw[0];
+    doSave(augmented, pending.date);
+  }, [pending, doSave]);
+
+  // Save without adding emotion
+  const saveAnyway = useCallback(() => {
+    if (!pending) return;
+    doSave(pending.text, pending.date);
+  }, [pending, doSave]);
+
+  // Cancel suggestion, go back to editing
+  const cancelPending = useCallback(() => {
+    setText(pending ? pending.text : "");
+    setPending(null);
+    setShowCustom(false);
+    setCustomEmo("");
+  }, [pending]);
+
+  // Save with custom emotion typed by student
+  const confirmCustom = useCallback(() => {
+    if (!pending || !customEmo.trim()) return;
+    const augmented = pending.text + " " + customEmo.trim();
+    doSave(augmented, pending.date);
+    setShowCustom(false);
+    setCustomEmo("");
+  }, [pending, customEmo, doSave]);
+
+  const del = useCallback((ts) => { if (readOnly) return; const u = entries.filter(e => e.ts !== ts); setEntries(u); save(u); }, [entries, readOnly, setEntries, save]);
+
+  const stats = useMemo(() => {
+    if (!entries.length) return null;
+    const freq = {};
+    entries.flatMap(e => e.analysis.hits).forEach(h => { freq[h.label] = freq[h.label] || { count: 0, q: h.q }; freq[h.label].count++; });
+    const sorted = Object.entries(freq).sort((a, b) => b[1].count - a[1].count);
+    return { sorted, avgPos: entries.reduce((s, e) => s + e.analysis.posPct, 0) / entries.length, avgNeg: entries.reduce((s, e) => s + e.analysis.negPct, 0) / entries.length, total: entries.length };
+  }, [entries]);
+
+  const tabS = (a) => ({ padding: "8px 16px", fontSize: 12, fontWeight: a ? 700 : 500, color: a ? "#6366f1" : "#94a3b8", background: a ? "#eef2ff" : "transparent", border: a ? "1px solid #c7d2fe" : "1px solid transparent", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" });
+  const tabs = readOnly
+    ? [["change", "📊 감정 변화"], ["detail", "🔍 감정일기장"]]
+    : [["input", "✏️ 감정 일기 쓰기"], ["change", "📊 감정 변화"], ["game", "🎮 감정 게임"], ["detail", "🔍 감정일기장"]];
+
+  const renderInput = () => (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <input value={date} onChange={e => setDate(e.target.value)} placeholder="날짜" style={{ ...inp, width: 80, fontWeight: 700, textAlign: "center", fontSize: 15 }} />
+          {date !== todayStr() ? (
+            <button onClick={() => setDate(todayStr())} style={{ fontSize: 10, padding: "2px 6px", background: "#eef2ff", color: "#6366f1", border: "1px solid #c7d2fe", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>오늘</button>
+          ) : (
+            <span style={{ fontSize: 10, color: "#2a9d8f", textAlign: "center", fontWeight: 600 }}>오늘</span>
+          )}
+        </div>
+        <textarea value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) add(); }} placeholder={"오늘의 감정을 기록하세요...\n날짜는 자동 입력됩니다"} rows={4} style={{ ...inp, flex: 1, resize: "vertical", lineHeight: 1.6 }} />
+      </div>
+      <button onClick={add} disabled={!text.trim() && !pending} style={{ ...bPri, width: "100%", opacity: (text.trim() || pending) ? 1 : 0.4 }}>분석 & 저장</button>
+
+      {/* ─── Emotion Suggestion Panel ─── */}
+      {pending && (
+        <div style={{ ...crd, marginTop: 16, border: "2px solid #c7d2fe", background: "linear-gradient(135deg, #eef2ff, #faf5ff)" }}>
+          <div style={{ fontSize: 14, fontWeight: 700, color: "#4338ca", marginBottom: 6 }}>
+            "{pending.text}"
+          </div>
+          <div style={{ fontSize: 13, color: "#6366f1", marginBottom: 12, lineHeight: 1.5 }}>
+            {pending.contextLabel
+              ? pending.contextLabel + "에 대해 썼네요! 어떤 감정을 느꼈나요?"
+              : "어떤 감정을 느꼈는지 선택해주세요!"}
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 12 }}>
+            {pending.suggestions.map((emo) => (
+              <button
+                key={emo.name}
+                onClick={() => { confirmWithEmotion(emo); setShowCustom(false); setCustomEmo(""); }}
+                style={{
+                  padding: "10px 16px", fontSize: 13, fontWeight: 600,
+                  background: QB[emo.q], color: QC[emo.q],
+                  border: "2px solid " + QC[emo.q] + "33",
+                  borderRadius: 12, cursor: "pointer",
+                  transition: "all 0.15s",
+                }}
+                onMouseEnter={(e) => { e.target.style.transform = "scale(1.05)"; e.target.style.borderColor = QC[emo.q]; }}
+                onMouseLeave={(e) => { e.target.style.transform = "scale(1)"; e.target.style.borderColor = QC[emo.q] + "33"; }}
+              >
+                {emo.label}
+              </button>
+            ))}
+            {/* 기타 버튼 */}
+            <button
+              onClick={() => setShowCustom(!showCustom)}
+              style={{
+                padding: "10px 16px", fontSize: 13, fontWeight: 600,
+                background: showCustom ? "#6366f1" : "#f1f5f9",
+                color: showCustom ? "#fff" : "#6366f1",
+                border: "2px solid #c7d2fe",
+                borderRadius: 12, cursor: "pointer",
+                transition: "all 0.15s",
+              }}
+            >
+              + 기타
+            </button>
+          </div>
+
+          {/* 기타 감정 직접 입력 */}
+          {showCustom && (
+            <div style={{ marginBottom: 12, padding: 12, background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0" }}>
+              <div style={{ fontSize: 12, color: "#6366f1", fontWeight: 600, marginBottom: 6 }}>내 감정을 직접 적어주세요</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <input
+                  value={customEmo}
+                  onChange={(e) => setCustomEmo(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === "Enter") confirmCustom(); }}
+                  placeholder="예: 뿌듯했다, 서운했다, 신났다..."
+                  style={{ ...inp, flex: 1, fontSize: 13 }}
+                  autoFocus
+                />
+                <button
+                  onClick={confirmCustom}
+                  disabled={!customEmo.trim()}
+                  style={{
+                    ...bPri, padding: "10px 18px", fontSize: 13,
+                    opacity: customEmo.trim() ? 1 : 0.4,
+                    flexShrink: 0,
+                  }}
+                >
+                  확인
+                </button>
+              </div>
+              <div style={{ marginTop: 8, fontSize: 11, color: "#94a3b8", lineHeight: 1.5 }}>
+                느꼈던 감정을 자유롭게 적어주세요. 감정 단어가 포함되면 자동으로 분석됩니다.
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", gap: 8 }}>
+            <button onClick={() => { saveAnyway(); setShowCustom(false); setCustomEmo(""); }} style={{ ...bSoft, fontSize: 12, padding: "8px 14px" }}>감정 없이 저장</button>
+            <button onClick={cancelPending} style={{ ...bSoft, fontSize: 12, padding: "8px 14px" }}>다시 쓰기</button>
+          </div>
+        </div>
+      )}
+
+      {lastR && !pending && (lastR.analysis.hits.length > 0 || lastR.analysis.matchedPos.length > 0 || lastR.analysis.matchedNeg.length > 0 || (lastR.analysis.excluded && lastR.analysis.excluded.length > 0)) && (
+        <div style={{ ...crd, marginTop: 16 }}>
+          <div style={lbl}>최근 분석</div>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>{lastR.analysis.hits.map((h, i) => <EmoTag key={i} h={h} />)}</div>
+          {lastR.analysis.excluded && lastR.analysis.excluded.length > 0 && <div style={{ marginTop: 8, fontSize: 11, color: "#94a3b8" }}>타인 감정 제외: {lastR.analysis.excluded.map(h => h.label + "(" + h.token + ")").join(", ")}</div>}
+          {lastR.analysis.matchedPos.length > 0 && <div style={{ marginTop: 8, fontSize: 11, color: "#2a9d8f" }}>보조 긍정: {lastR.analysis.matchedPos.map(m => m.word).join(", ")}</div>}
+          {lastR.analysis.matchedNeg.length > 0 && <div style={{ marginTop: 4, fontSize: 11, color: "#d00000" }}>보조 부정: {lastR.analysis.matchedNeg.map(m => m.word).join(", ")}</div>}
+          <div style={{ marginTop: 6, fontSize: 11, color: "#94a3b8" }}>긍정 {lastR.analysis.posPct.toFixed(0)}% · 부정 {lastR.analysis.negPct.toFixed(0)}%</div>
+        </div>
+      )}
+      {entries.length > 0 && (
+        <div style={{ marginTop: 20 }}>
+          <div style={lbl}>기록 ({entries.length}개)</div>
+          {[...entries].reverse().map((en) => {
+            const a = en.analysis;
+            const exc = a.excluded || [];
+            return (
+              <div key={en.ts} style={{ ...crd, padding: "12px 14px", marginBottom: 8 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span style={{ fontSize: 13, fontWeight: 700 }}>{en.date}</span>
+                  <button onClick={() => del(en.ts)} style={{ background: "none", border: "none", color: "#cbd5e1", cursor: "pointer", fontSize: 16 }}>x</button>
+                </div>
+                <div style={{ fontSize: 12, color: "#64748b", margin: "4px 0 8px", lineHeight: 1.5 }}>{en.text.length > 100 ? en.text.slice(0, 100) + "..." : en.text}</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  {a.hits.length === 0 && a.matchedPos.length === 0 && a.matchedNeg.length === 0 && exc.length === 0 && <span style={{ fontSize: 11, color: "#cbd5e1" }}>감정 미감지</span>}
+                  {a.hits.map((h, i) => <EmoTag key={i} h={h} />)}
+                  {a.matchedPos.length > 0 && <span style={{ ...bdg("#2a9d8f", "#e6f5f2"), fontSize: 10, padding: "2px 8px" }}>+{a.matchedPos.length}</span>}
+                  {a.matchedNeg.length > 0 && <span style={{ ...bdg("#d00000", "#fef2f2"), fontSize: 10, padding: "2px 8px" }}>-{a.matchedNeg.length}</span>}
+                  {exc.length > 0 && <span style={{ ...bdg("#94a3b8", "#f1f5f9"), fontSize: 10, padding: "2px 8px" }}>타인 {exc.length}</span>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
+  const renderChange = () => {
+    if (entries.length === 0) return <EmptyState icon="📊" text="감정 일기를 추가하면 감정 변화를 확인할 수 있어요" action={readOnly ? null : () => setTab("input")} />;
+    return (
+      <div>
+        {/* ── 선형 그래프 (위) ── */}
+        <div style={lbl}>감정 변화 추이</div>
+        {entries.length >= 2 ? (
+          <div>
+            <TrendChart entries={entries} />
+            {stats && (
+              <div style={{ ...crd, marginTop: 12, display: "flex", gap: 20, flexWrap: "wrap" }}>
+                <div><span style={{ color: "#94a3b8", fontSize: 13 }}>평균 긍정</span> <span style={{ color: "#2a9d8f", fontWeight: 700 }}>{stats.avgPos.toFixed(1)}%</span></div>
+                <div><span style={{ color: "#94a3b8", fontSize: 13 }}>평균 부정</span> <span style={{ color: "#d00000", fontWeight: 700 }}>{stats.avgNeg.toFixed(1)}%</span></div>
+                <div><span style={{ color: "#94a3b8", fontSize: 13 }}>기록</span> <span style={{ fontWeight: 700 }}>{stats.total}개</span></div>
+              </div>
+            )}
+            <div style={{ marginTop: 12 }}>
+              {entries.map((e) => {
+                const vn = (e.analysis.valence9 - 1) / 8;
+                const bc = vn > 0.55 ? "#2a9d8f" : vn < 0.4 ? "#d00000" : "#f59e0b";
+                return (
+                  <div key={e.ts} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 14px", marginBottom: 6, background: "#fff", borderRadius: 10, borderLeft: "3px solid " + bc, border: "1px solid #f1f5f9" }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, width: 36 }}>{e.date}</span>
+                    <div style={{ flex: 1, display: "flex", flexWrap: "wrap", gap: 3 }}>
+                      {e.analysis.hits.map((h, j) => <EmoTag key={j} h={h} />)}
+                      {e.analysis.hits.length === 0 && <span style={{ fontSize: 10, color: "#cbd5e1" }}>-</span>}
+                    </div>
+                    <span style={{ fontSize: 11, color: "#94a3b8", whiteSpace: "nowrap" }}>{e.analysis.posPct.toFixed(0)}+ {e.analysis.negPct.toFixed(0)}-</span>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        ) : (
+          <div style={{ padding: "16px 0", color: "#94a3b8", fontSize: 13 }}>추이 그래프는 2개 이상의 일기가 필요합니다.</div>
+        )}
+
+        {/* ── 구분선 ── */}
+        <div style={{ height: 1, background: "#e5e7eb", margin: "24px 0" }} />
+
+        {/* ── 원형 그래프 (아래) ── */}
+        <div style={lbl}>감정 원형 그래프</div>
+        <p style={{ fontSize: 11, color: "#94a3b8", margin: "0 0 14px" }}>컬러 점 = 감지 감정 / 어두운 점 = 일자 평균 / 점선 = 궤적</p>
+        <CircumplexChart entries={entries} hovIdx={hovIdx} onHover={setHovIdx} />
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginTop: 14 }}>
+          {entries.map((e, i) => (
+            <button key={e.ts} onMouseEnter={() => setHovIdx(i)} onMouseLeave={() => setHovIdx(null)} style={{ padding: "4px 10px", fontSize: 11, fontWeight: 600, background: hovIdx === i ? "#eef2ff" : "#f8fafc", color: hovIdx === i ? "#6366f1" : "#94a3b8", border: "1px solid " + (hovIdx === i ? "#c7d2fe" : "#e2e8f0"), borderRadius: 6, cursor: "pointer" }}>{e.date}</button>
+          ))}
+        </div>
+        {stats && stats.sorted.length > 0 && (
+          <div style={{ ...crd, marginTop: 20 }}>
+            <div style={lbl}>감정 빈도</div>
+            {stats.sorted.slice(0, 10).map(([lb, { count, q }]) => {
+              const mx = stats.sorted[0][1].count;
+              return (
+                <div key={lb} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 5 }}>
+                  <span style={{ width: 56, fontSize: 12, fontWeight: 600, color: QC[q], textAlign: "right" }}>{lb}</span>
+                  <div style={{ flex: 1, height: 8, background: "#f1f5f9", borderRadius: 4, overflow: "hidden" }}>
+                    <div style={{ width: (count / mx * 100) + "%", height: "100%", background: QC[q] + "44", borderRadius: 4 }} />
+                  </div>
+                  <span style={{ fontSize: 11, color: "#94a3b8", width: 22, textAlign: "right" }}>{count}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderDetail = () => {
+    if (entries.length === 0) return <EmptyState icon="🔍" text="감정일기장이 비어있습니다" action={readOnly ? null : () => setTab("input")} />;
+    return (
+      <div>
+        <div style={lbl}>감정일기장</div>
+        {entries.map((e) => (
+          <div key={e.ts} style={{ ...crd, marginBottom: 8 }}>
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 6 }}>📅 {e.date}</div>
+            <div style={{ fontSize: 12, color: "#64748b", marginBottom: 8, lineHeight: 1.5 }}>{e.text}</div>
+            <div style={{ fontSize: 11, lineHeight: 1.8, color: "#64748b" }}>
+              <div><b>Russell:</b> {e.analysis.hits.length > 0 ? e.analysis.hits.map(h => h.label + "(" + h.token + ")").join(", ") : "(없음)"}</div>
+              <div><b style={{ color: "#94a3b8" }}>타인 감정 제외:</b> {(e.analysis.excluded || []).length > 0 ? e.analysis.excluded.map(h => h.label + "(" + h.token + ")").join(", ") : "(없음)"}</div>
+              <div><b style={{ color: "#2a9d8f" }}>보조 긍정:</b> {e.analysis.matchedPos.length > 0 ? e.analysis.matchedPos.map(m => m.word + "(" + m.weight + "x)").join(", ") : "(없음)"}</div>
+              <div><b style={{ color: "#d00000" }}>보조 부정:</b> {e.analysis.matchedNeg.length > 0 ? e.analysis.matchedNeg.map(m => m.word + "(" + m.weight + "x)").join(", ") : "(없음)"}</div>
+              <div style={{ marginTop: 4, fontSize: 10, color: "#94a3b8" }}>V:{e.analysis.valence9.toFixed(2)} · A:{e.analysis.arousal9.toFixed(2)} · 긍정:{e.analysis.posPct.toFixed(1)}% · 부정:{e.analysis.negPct.toFixed(1)}%</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 6, marginBottom: 16, overflowX: "auto", paddingBottom: 4 }}>
+        {tabs.map(([k, l]) => (
+          <button key={k} style={tabS(tab === k)} onClick={() => setTab(k)}>{l}</button>
+        ))}
+      </div>
+      {tab === "input" && !readOnly && renderInput()}
+      {tab === "change" && renderChange()}
+      {tab === "game" && !readOnly && <EmotionGame />}
+      {tab === "detail" && renderDetail()}
+    </div>
+  );
+}
+
+/* ═══════════ Main App ═══════════ */
+function App() {
+  const [page, setPage] = useState("home");
+  const [loading, setLoading] = useState(true);
+  const [msg, setMsg] = useState("");
+  const [schools, setSchools] = useState([]);
+  const [currentUser, setCU] = useState(null);
+  const [loginForm, setLF] = useState({ schoolCode: "", name: "", role: "student" });
+  const [schoolForm, setSF] = useState({ schoolName: "", teacherName: "" });
+  const [studentForm, setStF] = useState({ studentName: "", grade: "", classNumber: "" });
+  const [myStudents, setMS] = useState([]);
+  const [viewStu, setVS] = useState(null);
+  const [viewEntries, setVE] = useState([]);
+  const [myEntries, setME] = useState([]);
+
+  useEffect(() => {
+    (async () => { const sc = await sGet(SK.schools); if (sc) setSchools(sc); setLoading(false); })();
+  }, []);
+
+  const genCode = () => "SCH" + Math.random().toString(36).substring(2, 8).toUpperCase();
+
+  const createSchool = async () => {
+    if (!schoolForm.schoolName.trim() || !schoolForm.teacherName.trim()) { setMsg("학교명과 교사명을 입력해주세요."); return; }
+    const code = genCode();
+    const ns = { id: Date.now(), schoolName: schoolForm.schoolName.trim(), teacherName: schoolForm.teacherName.trim(), schoolCode: code };
+    const updated = [...schools, ns]; setSchools(updated); await sSet(SK.schools, updated);
+    await sSet(stuKey(code), []);
+    setCU(ns); setMS([]); setPage("teacherDash"); setSF({ schoolName: "", teacherName: "" });
+    setMsg("✅ 학교가 생성되었습니다! 학교 코드: " + code);
+  };
+
+  const teacherLogin = async () => {
+    const s = schools.find(s => s.schoolCode === loginForm.schoolCode.trim().toUpperCase() && s.teacherName === loginForm.name.trim());
+    if (s) { setCU(s); const st = await sGet(stuKey(s.schoolCode)) || []; setMS(st); setPage("teacherDash"); setLF({ schoolCode: "", name: "", role: "student" }); setMsg(""); }
+    else setMsg("학교 코드 또는 교사명이 일치하지 않습니다.");
+  };
+
+  const studentLogin = async () => {
+    const code = loginForm.schoolCode.trim().toUpperCase();
+    const school = schools.find(s => s.schoolCode === code);
+    if (!school) { setMsg("학교 코드가 존재하지 않습니다."); return; }
+    const stuList = await sGet(stuKey(code)) || [];
+    const found = stuList.find(s => s.name === loginForm.name.trim());
+    if (!found) { setMsg("등록되지 않은 학생입니다. 교사에게 등록을 요청하세요."); return; }
+    setCU({ ...found, schoolCode: code, schoolName: school.schoolName });
+    const entries = await sGet(dKey(found.id)) || []; setME(entries);
+    setPage("studentDiary"); setLF({ schoolCode: "", name: "", role: "student" }); setMsg("");
+  };
+
+  const handleLogin = () => {
+    if (!loginForm.schoolCode.trim() || !loginForm.name.trim()) { setMsg("학교 코드와 이름을 입력해주세요."); return; }
+    loginForm.role === "teacher" ? teacherLogin() : studentLogin();
+  };
+
+  const addStudent = async () => {
+    if (!studentForm.studentName.trim()) { setMsg("학생 이름을 입력해주세요."); return; }
+    const code = currentUser.schoolCode;
+    const list = await sGet(stuKey(code)) || [];
+    if (list.some(s => s.name === studentForm.studentName.trim())) { setMsg("이미 등록된 학생 이름입니다."); return; }
+    const ns = { id: Date.now(), name: studentForm.studentName.trim(), grade: studentForm.grade.trim(), classNumber: studentForm.classNumber.trim() };
+    const updated = [...list, ns]; await sSet(stuKey(code), updated); setMS(updated);
+    await sSet(dKey(ns.id), []);
+    setStF({ studentName: "", grade: "", classNumber: "" }); setMsg("✅ " + ns.name + " 학생이 추가되었습니다.");
+  };
+
+  const delStudent = async (stu) => {
+    if (!confirm(stu.name + " 학생을 삭제할까요?")) return;
+    const code = currentUser.schoolCode;
+    const updated = myStudents.filter(s => s.id !== stu.id); await sSet(stuKey(code), updated); setMS(updated);
+    try { localStorage.removeItem(dKey(stu.id)); } catch (e) { /* ok */ }
+    if (viewStu && viewStu.id === stu.id) { setVS(null); setVE([]); }
+    setMsg(stu.name + " 학생이 삭제되었습니다.");
+  };
+
+  const viewStudentRecords = async (stu) => { setVS(stu); const e = await sGet(dKey(stu.id)) || []; setVE(e); };
+  const clearStuRecords = async (stu) => { if (!confirm(stu.name + "의 기록을 모두 비울까요?")) return; await sSet(dKey(stu.id), []); if (viewStu && viewStu.id === stu.id) setVE([]); setMsg("기록이 비워졌습니다."); };
+  const saveMyEntries = useCallback(async (e) => { if (!currentUser) return; await sSet(dKey(currentUser.id), e); }, [currentUser]);
+  const logout = () => { setCU(null); setPage("home"); setMsg(""); setVS(null); setVE([]); setME([]); };
+
+  const msgBox = msg ? <div style={{ margin: "12px 0", padding: "12px 16px", borderRadius: 12, background: msg.startsWith("✅") ? "#ecfdf5" : "#fef2f2", color: msg.startsWith("✅") ? "#065f46" : "#991b1b", fontSize: 13, fontWeight: 500, border: "1px solid " + (msg.startsWith("✅") ? "#a7f3d0" : "#fecaca") }}>{msg}</div> : null;
+
+  if (loading) return <div style={{ ...shell, display: "flex", alignItems: "center", justifyContent: "center", height: "100vh" }}><span style={{ color: "#94a3b8" }}>불러오는 중...</span></div>;
+
+  /* ─── HOME ─── */
+  if (page === "home") return (
+    <div style={shell}>
+      
+      <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 24 }}>
+        <h1 style={{ fontSize: 36, fontWeight: 800, margin: 0, background: "linear-gradient(135deg,#6366f1,#8b5cf6)", WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>감정 다이어리</h1>
+        <p style={{ fontSize: 14, color: "#64748b", margin: "8px 0 40px", textAlign: "center", lineHeight: 1.6 }}>러셀의 원형 그래프 28개 + 130개의 감정을 분석하여<br />매일의 나의 감정을 분석합니다.</p>
+        <div style={{ display: "flex", gap: 20, maxWidth: 720, width: "100%", flexWrap: "wrap" }}>
+          {/* Login */}
+          <div style={{ ...crd, padding: 24, flex: "1 1 320px" }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, margin: "0 0 4px" }}>🔑 로그인</h2>
+            <p style={{ fontSize: 12, color: "#94a3b8", margin: "0 0 16px" }}>학교 코드와 이름으로 접속</p>
+            {msgBox}
+            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+              {["student", "teacher"].map(r => (
+                <button key={r} onClick={() => setLF({ ...loginForm, role: r })} style={{ flex: 1, padding: 10, fontSize: 13, fontWeight: 600, borderRadius: 10, border: "none", cursor: "pointer", background: loginForm.role === r ? "#6366f1" : "#f1f5f9", color: loginForm.role === r ? "#fff" : "#64748b" }}>
+                  {r === "student" ? "🎒 학생" : "🏫 교사"}
+                </button>
+              ))}
+            </div>
+            <input value={loginForm.schoolCode} onChange={e => setLF({ ...loginForm, schoolCode: e.target.value.toUpperCase() })} placeholder="학교 코드 (예: SCH3A7B2C)" style={{ ...inp, marginBottom: 8, fontWeight: 600, letterSpacing: 1 }} />
+            <input value={loginForm.name} onChange={e => setLF({ ...loginForm, name: e.target.value })} onKeyDown={e => { if (e.key === "Enter") handleLogin(); }} placeholder={loginForm.role === "teacher" ? "교사 이름" : "학생 이름"} style={{ ...inp, marginBottom: 12 }} />
+            <button onClick={handleLogin} style={{ ...bPri, width: "100%" }}>로그인</button>
+          </div>
+          {/* Register */}
+          <div style={{ ...crd, padding: 24, flex: "1 1 320px" }}>
+            <h2 style={{ fontSize: 20, fontWeight: 700, margin: "0 0 4px" }}>🏫 학교 등록</h2>
+            <p style={{ fontSize: 12, color: "#94a3b8", margin: "0 0 16px" }}>교사가 학교를 등록하고 코드를 받습니다</p>
+            <input value={schoolForm.schoolName} onChange={e => setSF({ ...schoolForm, schoolName: e.target.value })} placeholder="학교명 (예: 행복초등학교)" style={{ ...inp, marginBottom: 8 }} />
+            <input value={schoolForm.teacherName} onChange={e => setSF({ ...schoolForm, teacherName: e.target.value })} onKeyDown={e => { if (e.key === "Enter") createSchool(); }} placeholder="교사 이름 (예: 김선생)" style={{ ...inp, marginBottom: 12 }} />
+            <button onClick={createSchool} style={{ ...bPri, width: "100%", background: "linear-gradient(135deg,#3b82f6,#6366f1)" }}>학교 생성하기</button>
+            <div style={{ marginTop: 12, padding: 12, background: "#eff6ff", borderRadius: 10, border: "1px solid #bfdbfe", fontSize: 12, color: "#1e40af", lineHeight: 1.5 }}>💡 학교 생성 후 고유 학교 코드가 발급됩니다. 이 코드를 학생들에게 공유하세요.</div>
+          </div>
+        </div>
+        {schools.length > 0 && (
+          <div style={{ ...crd, marginTop: 24, maxWidth: 720, width: "100%", padding: 20 }}>
+            <div style={lbl}>등록된 학교</div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {schools.map(s => (
+                <div key={s.id} style={{ padding: "8px 14px", background: "#f8fafc", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 13 }}>
+                  <b>{s.schoolName}</b> · {s.teacherName} <span style={{ ...bdg(), marginLeft: 4 }}>{s.schoolCode}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  /* ─── STUDENT DIARY ─── */
+  if (page === "studentDiary" && currentUser) return (
+    <div style={shell}>
+      
+      <div style={{ padding: "24px 24px 16px", borderBottom: "1px solid #e5e7eb", background: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>{currentUser.name}의 감정 일기</h1>
+          <p style={{ fontSize: 12, color: "#94a3b8", margin: "4px 0 0" }}>{currentUser.schoolName}</p>
+        </div>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <span style={bdg()}>{currentUser.schoolCode}</span>
+          <button onClick={logout} style={bSoft}>로그아웃</button>
+        </div>
+      </div>
+      <div style={{ padding: "20px 24px", maxWidth: 600, margin: "0 auto" }}>
+        <DiaryView entries={myEntries} setEntries={setME} save={saveMyEntries} readOnly={false} />
+      </div>
+    </div>
+  );
+
+  /* ─── TEACHER DASH ─── */
+  if (page === "teacherDash" && currentUser) return (
+    <div style={shell}>
+      
+      <div style={{ padding: "24px 24px 16px", borderBottom: "1px solid #e5e7eb", background: "#fff", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>{currentUser.schoolName}</h1>
+          <p style={{ fontSize: 12, color: "#94a3b8", margin: "4px 0 0" }}>교사: {currentUser.teacherName} · 학교 코드: <b style={{ color: "#6366f1" }}>{currentUser.schoolCode}</b></p>
+        </div>
+        <button onClick={logout} style={bSoft}>로그아웃</button>
+      </div>
+      <div style={{ padding: "20px 24px", maxWidth: 760, margin: "0 auto" }}>
+        {msgBox}
+        {/* Add student */}
+        <div style={{ ...crd, marginBottom: 16 }}>
+          <div style={lbl}>학생 추가</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input value={studentForm.studentName} onChange={e => setStF({ ...studentForm, studentName: e.target.value })} placeholder="학생 이름" style={{ ...inp, flex: "2 1 160px" }} />
+            <input value={studentForm.grade} onChange={e => setStF({ ...studentForm, grade: e.target.value })} placeholder="학년" style={{ ...inp, flex: "1 1 80px" }} />
+            <input value={studentForm.classNumber} onChange={e => setStF({ ...studentForm, classNumber: e.target.value })} placeholder="반" style={{ ...inp, flex: "1 1 80px" }} />
+          </div>
+          <button onClick={addStudent} style={{ ...bPri, marginTop: 10 }}>학생 추가</button>
+        </div>
+        {/* Student list */}
+        <div style={{ ...crd, marginBottom: 16 }}>
+          <div style={lbl}>등록된 학생 ({myStudents.length}명)</div>
+          {myStudents.length === 0 && <p style={{ color: "#94a3b8", fontSize: 13 }}>아직 등록된 학생이 없습니다.</p>}
+          {myStudents.map(s => (
+            <div key={s.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 14px", marginBottom: 6, background: "#f8fafc", borderRadius: 12, border: "1px solid #f1f5f9", flexWrap: "wrap", gap: 8 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 14 }}>{s.name}</div>
+                {s.grade && <div style={{ fontSize: 12, color: "#94a3b8" }}>{s.grade}학년 {s.classNumber}반</div>}
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button onClick={() => viewStudentRecords(s)} style={{ ...bSoft, padding: "6px 12px", fontSize: 12, background: (viewStu && viewStu.id === s.id) ? "#eef2ff" : "#f1f5f9", color: (viewStu && viewStu.id === s.id) ? "#6366f1" : "#475569", border: "1px solid " + ((viewStu && viewStu.id === s.id) ? "#c7d2fe" : "#e2e8f0") }}>기록 조회</button>
+                <button onClick={() => clearStuRecords(s)} style={{ ...bSoft, padding: "6px 12px", fontSize: 12, color: "#d97706", border: "1px solid #fde68a", background: "#fffbeb" }}>비우기</button>
+                <button onClick={() => delStudent(s)} style={{ ...bDanger, padding: "6px 12px", fontSize: 12 }}>삭제</button>
+              </div>
+            </div>
+          ))}
+        </div>
+        {/* View records */}
+        {viewStu && (
+          <div style={crd}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <div>
+                <div style={lbl}>학생 기록 조회</div>
+                <div style={{ fontSize: 16, fontWeight: 700 }}>{viewStu.name} {viewStu.grade && <span style={{ fontSize: 13, color: "#94a3b8", fontWeight: 500 }}>({viewStu.grade}학년 {viewStu.classNumber}반)</span>}</div>
+                <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>저장된 일기: {viewEntries.length}개</div>
+              </div>
+              <button onClick={() => { setVS(null); setVE([]); }} style={{ ...bSoft, padding: "6px 12px", fontSize: 12 }}>닫기</button>
+            </div>
+            <DiaryView entries={viewEntries} setEntries={setVE} save={async (e) => await sSet(dKey(viewStu.id), e)} readOnly={true} />
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  return null;
+}
+
+const root = ReactDOM.createRoot(document.getElementById("root"));
+root.render(React.createElement(App));
+</script>
+</body>
+</html>
