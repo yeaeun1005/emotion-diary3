@@ -903,8 +903,8 @@ function DiaryView({ entries, setEntries, save, readOnly }) {
 
   const tabS = (a) => ({ padding: "8px 16px", fontSize: 12, fontWeight: a ? 700 : 500, color: a ? "#6366f1" : "#94a3b8", background: a ? "#eef2ff" : "transparent", border: a ? "1px solid #c7d2fe" : "1px solid transparent", borderRadius: 10, cursor: "pointer", whiteSpace: "nowrap" });
   const tabs = readOnly
-    ? [["change", "📊 감정 변화"], ["detail", "🔍 감정일기장"]]
-    : [["input", "✏️ 감정 일기 쓰기"], ["change", "📊 감정 변화"], ["game", "🎮 감정 게임"], ["detail", "🔍 감정일기장"]];
+    ? [["change", "📊 감정 분석"], ["detail", "🔍 감정 일기장"]]
+    : [["input", "✏️ 감정 일기 쓰기"], ["change", "📊 감정 분석"], ["game", "🎮 감정 게임"], ["detail", "🔍 감정 일기장"]];
 
   const renderInput = () => (
     <div>
